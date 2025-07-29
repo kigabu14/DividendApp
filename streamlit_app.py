@@ -1,12 +1,10 @@
-# streamlit_app.py
-import pandas as pd
 import streamlit as st
+import pandas as pd
+
 from database.db import init_db
 from modules import portfolio, calendarview, dividend_tools, favorites
 
-# เรียกใช้ตอนเริ่มระบบ
 init_db()
-
 # Layout & Theme
 st.set_page_config(
     page_title="SET Dividend Tracker",
