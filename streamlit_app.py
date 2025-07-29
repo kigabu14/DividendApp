@@ -1,22 +1,21 @@
-# streamlit_app.py
 import streamlit as st
-from modules.portfolio import show_portfolio
+from modules.portfolio import portfolio_page
+from modules.calendarview import show_calendar
 from modules.dividend_tools import dca_calculator
-from modules.calendar_view import show_calendar
-from modules.favorites import show_favorites
 
 st.set_page_config(layout="wide", page_title="Dividend Tracker", page_icon="📈")
 
-menu = st.sidebar.radio("📌 เลือกเมนู", ["📊 ภาพรวม", "📁 พอร์ต", "📅 ปฏิทิน XD", "🧮 ถัวเฉลี่ย (DCA)"])
+menu = st.sidebar.radio("เมนู", ["📊 ภาพรวม", "📁 พอร์ต", "📅 ปฏิทิน XD", "🧮 ถัวเฉลี่ย (DCA)"])
 
 if menu == "📊 ภาพรวม":
-    summary_dashboard()
+    st.header("📊 Dashboard: Portfolio + Dividend")
+    portfolio_page(show_dividend=True)
 
 elif menu == "📁 พอร์ต":
-    portfolio_page()
+    portfolio_page(show_dividend=False)
 
 elif menu == "📅 ปฏิทิน XD":
-    xd_calendar()
+    show_calendar()
 
 elif menu == "🧮 ถัวเฉลี่ย (DCA)":
     dca_calculator()
