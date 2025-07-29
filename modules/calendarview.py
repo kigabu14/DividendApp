@@ -1,61 +1,40 @@
+# modules/calendarview.py
+
 import streamlit as st
 import pandas as pd
-import yfinance as yf
-from datetime import datetime
-from modules.db import get_all_stocks
+from database import db
+from modules.stock_data import get_dividends
+from config import MONTH_LABELS
 
-def get_dividends(symbol: str) -> pd.DataFrame:
-    try:
-        stock = yf.Ticker(symbol + ".BK")  # ต่อ .BK สำหรับหุ้นไทย
-        dividends = stock.dividends
-        if dividends.empty:
-            return pd.DataFrame()
-        df = dividends.reset_index()
-        df.columns = ["Date", "Dividend"]
-        df["Date"] = pd.to_datetime(df["Date"])
-        df["Month"] = df["Date"].dt.month
-        df["Year"] = df["Date"].dt.year
-        df["Symbol"] = symbol
-        return df[df["Year"] >= datetime.now().year - 5]  # 5 ปีล่าสุด
-    except Exception as e:
-        st.warning(f"⚠️ ดึงข้อมูลไม่ได้สำหรับ {symbol}: {e}")
-        return pd.DataFrame()
+def show_xd_calendar():
+    st.title("📆 XD Calendar - หุ้นในพอร์ต")
 
-def show_calendar():
-    st.subheader("📅 ปฏิทินปันผล (เฉพาะหุ้นที่คุณมีในพอร์ต)")
-
-    # ดึงหุ้นจาก database
-    df_port = get_all_stocks()
-    if df_port.empty:
-        st.info("❌ ยังไม่มีข้อมูลหุ้นในพอร์ต")
+    raw_data = db.get_portfolio()
+    if not raw_data:
+        st.warning("ยังไม่มีหุ้นในพอร์ต")
         return
 
-    stock_list = df_port["symbol"].unique()
+    df = pd.DataFrame(raw_data, columns=["symbol", "group", "sector", "avg_price", "quantity", "total_cost"])
+    year = st.selectbox("เลือกปี", options=range(2020, 2026), index=5)  # default: 2025
 
-    # สร้าง dict เก็บหุ้นที่ปันผลในแต่ละเดือน
-    calendar = {i: [] for i in range(1, 13)}  # 1-12 = Jan to Dec
+    # เตรียมข้อมูล
+    calendar = {month: [] for month in range(1, 13)}
 
-    with st.spinner("🔄 กำลังโหลดข้อมูลปันผลย้อนหลัง..."):
-        for symbol in stock_list:
-            df_div = get_dividends(symbol)
-            for month in df_div["Month"].unique():
-                calendar[month].append(symbol)
+    for symbol in df["symbol"]:
+        div_df = get_dividends(symbol)
+        if not div_df.empty:
+            filtered = div_df[div_df["Year"] == year]
+            for _, row in filtered.iterrows():
+                month = row["Month"]
+                calendar[month].append(f"{symbol} ({row['Dividend']:.2f})")
 
-    months_th = [
-        "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
-        "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
-    ]
-
-    st.markdown("### 🗓 หุ้นที่คุณถือ จ่ายปันผลเดือนไหนบ้าง (ย้อนหลัง 5 ปี)")
-
-    cols = st.columns(6)
-
+    # แสดงเป็นตาราง 3x4 (12 เดือน)
+    cols = st.columns(4)
     for i in range(12):
-        with cols[i % 6]:
-            st.markdown(f"#### {months_th[i]}")
-            stocks = sorted(set(calendar[i + 1]))
-            if stocks:
-                for stock in stocks:
+        with cols[i % 4]:
+            st.markdown(f"#### {MONTH_LABELS[i]}")
+            if calendar[i + 1]:
+                for stock in calendar[i + 1]:
                     st.markdown(f"- {stock}")
             else:
-                st.markdown("ไม่มี")
+                st.markdown("_ไม่มีข้อมูล_")
