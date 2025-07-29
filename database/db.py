@@ -1,7 +1,22 @@
 import sqlite3
 
 DB_FILE = "database.db"
+def add_to_portfolio(symbol, group, sector, avg_price, quantity):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR REPLACE INTO portfolio (symbol, "group", sector, avg_price, quantity)
+        VALUES (?, ?, ?, ?, ?)
+    """, (symbol, group, sector, avg_price, quantity))
+    conn.commit()
+    conn.close()
 
+def delete_from_portfolio(symbol):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM portfolio WHERE symbol = ?", (symbol,))
+    conn.commit()
+    conn.close()
 def get_connection():
     return sqlite3.connect(DB_FILE)
 
