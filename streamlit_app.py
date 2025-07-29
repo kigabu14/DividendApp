@@ -1,21 +1,46 @@
+# streamlit_app.py
+
 import streamlit as st
-from modules.portfolio import portfolio_page
-from modules.calendarview import show_calendar
-from modules.dividend_tools import dca_calculator
+from database.db import init_db
+from modules import portfolio, calendarview, dividend_tools, favorites
 
-st.set_page_config(layout="wide", page_title="Dividend Tracker", page_icon="📈")
+# เรียกใช้ตอนเริ่มระบบ
+init_db()
 
-menu = st.sidebar.radio("เมนู", ["📊 ภาพรวม", "📁 พอร์ต", "📅 ปฏิทิน XD", "🧮 ถัวเฉลี่ย (DCA)"])
+# Layout & Theme
+st.set_page_config(
+    page_title="SET Dividend Tracker",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-if menu == "📊 ภาพรวม":
-    st.header("📊 Dashboard: Portfolio + Dividend")
-    portfolio_page(show_dividend=True)
+# Sidebar
+st.sidebar.title("📌 เมนู")
+page = st.sidebar.radio("ไปยังหน้า", [
+    "🏠 Dashboard",
+    "📊 Portfolio",
+    "📅 XD Calendar",
+    "🧮 DCA Calculator",
+    "❤️ Favorites"
+])
 
-elif menu == "📁 พอร์ต":
-    portfolio_page(show_dividend=False)
+# ส่วนหลัก
+if page == "🏠 Dashboard":
+    portfolio.show_portfolio()
+    dividend_tools.summary_dividend_chart(portfolio_df=pd.DataFrame.from_records(
+        data=[(s, g, se, ap, q, tc) for s, g, se, ap, q, tc in portfolio.db.get_portfolio()],
+        columns=["symbol", "group", "sector", "avg_price", "quantity", "total_cost"]
+    ))
 
-elif menu == "📅 ปฏิทิน XD":
-    show_calendar()
+elif page == "📊 Portfolio":
+    portfolio.show_portfolio()
 
-elif menu == "🧮 ถัวเฉลี่ย (DCA)":
-    dca_calculator()
+elif page == "📅 XD Calendar":
+    calendarview.show_xd_calendar()
+
+elif page == "🧮 DCA Calculator":
+    dividend_tools.dca_calculator()
+
+elif page == "❤️ Favorites":
+    favorites.show_favorites()
