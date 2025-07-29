@@ -1,7 +1,6 @@
 import sqlite3
-import sqlite3
 
-DB_FILE = "dividends.db"
+DB_FILE = "database.db"
 
 def get_connection():
     return sqlite3.connect(DB_FILE)
