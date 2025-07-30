@@ -2,39 +2,48 @@
 
 import streamlit as st
 import pandas as pd
+import yfinance as yf
 from database import db
-from modules.stock_data import get_dividends
-from config import MONTH_LABELS
+from datetime import datetime
+
+def get_dividend_history(symbol):
+    try:
+        stock = yf.Ticker(symbol + '.BK')
+        df = stock.dividends
+        df = df.reset_index()
+        df.columns = ["date", "dividend"]
+        df["symbol"] = symbol
+        return df
+    except Exception as e:
+        st.warning(f"ดึงข้อมูล {symbol} ไม่สำเร็จ: {e}")
+        return pd.DataFrame(columns=["date", "dividend", "symbol"])
 
 def show_xd_calendar():
-    st.title("📆 XD Calendar - หุ้นในพอร์ต")
+    st.title("📅 XD Calendar")
 
-    raw_data = db.get_portfolio()
-    if not raw_data:
-        st.warning("ยังไม่มีหุ้นในพอร์ต")
+    portfolio = db.get_portfolio()
+    if not portfolio:
+        st.info("ยังไม่มีหุ้นในพอร์ต กรุณาเพิ่มหุ้นก่อน")
         return
 
-    df = pd.DataFrame(raw_data, columns=["symbol", "group", "sector", "avg_price", "quantity", "total_cost"])
-    year = st.selectbox("เลือกปี", options=range(2020, 2026), index=5)  # default: 2025
+    # เอา symbol จากพอร์ต
+    symbols = [row[0] for row in portfolio]
 
-    # เตรียมข้อมูล
-    calendar = {month: [] for month in range(1, 13)}
+    all_dividends = []
+    for symbol in symbols:
+        df = get_dividend_history(symbol)
+        all_dividends.append(df)
 
-    for symbol in df["symbol"]:
-        div_df = get_dividends(symbol)
-        if not div_df.empty:
-            filtered = div_df[div_df["Year"] == year]
-            for _, row in filtered.iterrows():
-                month = row["Month"]
-                calendar[month].append(f"{symbol} ({row['Dividend']:.2f})")
+    if not all_dividends:
+        st.warning("ไม่พบข้อมูลปันผล")
+        return
 
-    # แสดงเป็นตาราง 3x4 (12 เดือน)
-    cols = st.columns(4)
-    for i in range(12):
-        with cols[i % 4]:
-            st.markdown(f"#### {MONTH_LABELS[i]}")
-            if calendar[i + 1]:
-                for stock in calendar[i + 1]:
-                    st.markdown(f"- {stock}")
-            else:
-                st.markdown("_ไม่มีข้อมูล_")
+    df = pd.concat(all_dividends)
+    df["month"] = df["date"].dt.month
+    df["year"] = df["date"].dt.year
+    df["month_name"] = df["date"].dt.strftime("%B")
+
+    # group by calendar
+    calendar = df.groupby(["year", "month_name", "symbol"]).agg({"dividend": "sum"}).reset_index()
+
+    st.dataframe(calendar.sort_values(by=["year", "month_name"]))
