@@ -2,9 +2,11 @@ import streamlit as st
 import pandas as pd
 
 from database.db import init_db
+from database import db  # ✅ เพิ่มตรงนี้
 from modules import portfolio, calendarview, dividend_tools, favorites
 
 init_db()
+
 # Layout & Theme
 st.set_page_config(
     page_title="SET Dividend Tracker",
@@ -26,10 +28,14 @@ page = st.sidebar.radio("ไปยังหน้า", [
 # ส่วนหลัก
 if page == "🏠 Dashboard":
     portfolio.show_portfolio()
-    dividend_tools.summary_dividend_chart(portfolio_df=pd.DataFrame.from_records(
-        data=[(s, g, se, ap, q, tc) for s, g, se, ap, q, tc in portfolio.db.get_portfolio()],
+    
+    data = [(s, g, se, ap, q, ap * q) for s, g, se, ap, q in db.get_portfolio()]
+    portfolio_df = pd.DataFrame(
+        data,
         columns=["symbol", "group", "sector", "avg_price", "quantity", "total_cost"]
-    ))
+    )
+
+    dividend_tools.summary_dividend_chart(portfolio_df)  # ✅ เรียกฟังก์ชันให้ถูก
 
 elif page == "📊 Portfolio":
     portfolio.show_portfolio()
