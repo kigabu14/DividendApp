@@ -33,7 +33,7 @@ PORTFOLIO_COLS = [
 ]
 
 # Database
-DATABASE_PATH = "database/dividend_portfolio.db"
+DATABASE_PATH = "database/database.db"
 
 # Target goal
 DEFAULT_ANNUAL_GOAL = 50000  # บาทต่อปี
