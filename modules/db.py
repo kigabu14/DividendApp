@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 
 def get_conn():
-    conn = sqlite3.connect("data/dividend_data.db", check_same_thread=False)
+    conn = sqlite3.connect("data/database.db", check_same_thread=False)
     return conn
 
 def get_all_stocks():
