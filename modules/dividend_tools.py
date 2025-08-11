@@ -1,111 +1,188 @@
 import streamlit as st
 import pandas as pd
-from math import floor
+from datetime import datetime
+from config import DEFAULT_ANNUAL_GOAL
+from modules.stock_data import get_dividends  # ฟังก์ชันดึงปันผลจาก yfinance
+from visualization import plot_dividend_progress  # ใช้ gauge ที่มีอยู่แล้ว
 
-# Ensure these helpers/constants exist or adjust as needed
-DEFAULT_ANNUAL_GOAL = 10000  # Example fallback
-def get_dividends(symbol: str) -> pd.DataFrame:
-    # TODO: Replace with your real implementation
-    return pd.DataFrame(columns=["ExDate", "Dividend"])
+# -------------------------------------------------
+# Utility / Cache Layer
+# -------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=60 * 30)  # cache 30 นาที
+def load_dividend_history(symbol: str) -> pd.DataFrame:
+    """
+    ดึงข้อมูลปันผลของหุ้นหนึ่งตัว (ใช้ cache)
+    คืน DataFrame คอลัมน์: Date, Dividend, Year, Month
+    """
+    df = get_dividends(symbol)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["Date", "Dividend", "Year", "Month"])
+    return df
 
-def plot_dividend_progress(total_div, goal_amount):
-    import plotly.graph_objects as go
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=total_div,
-        gauge={'axis': {'range': [0, goal_amount]}},
-        title={'text': 'Annual Dividend Progress'}
-    ))
-    return fig
+def format_money(v):
+    try:
+        return f"{v:,.2f}"
+    except Exception:
+        return "-"
 
-def summary_dividend_chart(portfolio_df, goal_amount=DEFAULT_ANNUAL_GOAL):
+# -------------------------------------------------
+# Dashboard Dividend Summary
+# -------------------------------------------------
+def summary_dividend_chart(portfolio_df: pd.DataFrame, goal_amount: float = DEFAULT_ANNUAL_GOAL):
     st.subheader("📈 ความคืบหน้าของเป้าหมายปันผลรายปี")
-    dividend_data = []
-    total_div = 0.0
 
-    for _, row in portfolio_df.iterrows():
-        symbol = row["symbol"]
-        quantity = row["quantity"]
-        avg_price = row["avg_price"]
+    # กรณีไม่มีพอร์ต
+    if portfolio_df is None or portfolio_df.empty:
+        st.info("ยังไม่มีหุ้นในพอร์ต หรือยังไม่ได้เพิ่มข้อมูล")
+        return
 
-        dividends_df = get_dividends(symbol)
-        if dividends_df.empty:
-            continue
+    required_cols = {"symbol", "quantity", "avg_price"}
+    if not required_cols.issubset(portfolio_df.columns):
+        st.error(f"ข้อมูลพอร์ตขาดคอลัมน์: {required_cols - set(portfolio_df.columns)}")
+        return
 
-        annual_div = dividends_df["Dividend"].sum()
-        total = annual_div * quantity
-        yield_percent = (annual_div / avg_price) * 100 if avg_price > 0 else 0
+    dividend_rows = []
+    total_dividend_baht = 0.0
 
-        dividend_data.append({
-            "หุ้น": symbol,
-            "จำนวน": quantity,
-            "ราคาซื้อเฉลี่ย": avg_price,
-            "เงินปันผล/หุ้น": round(annual_div, 2),
-            "รวมปันผล": round(total, 2),
-            "ผลตอบแทนต่อปี (%)": round(yield_percent, 2)
-        })
+    with st.spinner("กำลังดึงข้อมูลปันผล..."):
+        for _, row in portfolio_df.iterrows():
+            symbol = str(row["symbol"]).strip()
+            quantity = float(row.get("quantity", 0) or 0)
+            avg_price = float(row.get("avg_price", 0) or 0)
 
-        total_div += total
+            if not symbol:
+                continue
 
-    if dividend_data:
-        df = pd.DataFrame(dividend_data)
-        st.dataframe(df, use_container_width=True)
+            div_df = load_dividend_history(symbol)
 
-    fig = plot_dividend_progress(total_div, goal_amount)
+            if div_df.empty:
+                # แสดงแถวแจ้งว่าไม่มีปันผล (ถ้าต้องการข้ามก็เปลี่ยน continue)
+                dividend_rows.append({
+                    "หุ้น": symbol,
+                    "จำนวน": quantity,
+                    "ราคาซื้อเฉลี่ย": avg_price,
+                    "เงินปันผล/หุ้น (ปีล่าสุด)": 0.0,
+                    "รวมปันผล (ประเมิน)": 0.0,
+                    "ผลตอบแทนต่อปี (%)": 0.0,
+                    "รายการ (ปีล่าสุด)": "-"
+                })
+                continue
+
+            # คำนวณเฉพาะ "ปีล่าสุดที่มีข้อมูล"
+            latest_year = div_df["Year"].max()
+            latest_year_df = div_df[div_df["Year"] == latest_year]
+
+            annual_div_per_share = latest_year_df["Dividend"].sum()
+            est_total = annual_div_per_share * quantity
+            yield_percent = (annual_div_per_share / avg_price * 100) if avg_price > 0 else 0.0
+
+            total_dividend_baht += est_total
+
+            # อธิบายรายการของปีล่าสุด (วันที่ + จำนวน)
+            items_desc = ", ".join(
+                latest_year_df.sort_values("Date")["Dividend"].apply(lambda x: f"{x:.2f}").tolist()
+            )
+
+            dividend_rows.append({
+                "หุ้น": symbol,
+                "จำนวน": quantity,
+                "ราคาซื้อเฉลี่ย": round(avg_price, 2),
+                "เงินปันผล/หุ้น (ปีล่าสุด)": round(annual_div_per_share, 3),
+                "รวมปันผล (ประเมิน)": round(est_total, 2),
+                "ผลตอบแทนต่อปี (%)": round(yield_percent, 2),
+                "รายการ (ปีล่าสุด)": items_desc if items_desc else "-"
+            })
+
+    if dividend_rows:
+        df_show = pd.DataFrame(dividend_rows)
+        st.dataframe(df_show, use_container_width=True)
+    else:
+        st.warning("ไม่พบข้อมูลปันผลของหุ้นในพอร์ตเลย")
+
+    fig = plot_dividend_progress(total_dividend_baht, goal=goal_amount)
     st.plotly_chart(fig, use_container_width=True)
-    st.markdown(f"💰 รวมปันผลจากหุ้นทั้งหมด: **{total_div:,.2f} บาท**")
 
+    st.markdown(
+        f"💰 รวมปันผลที่ประเมิน (ปีล่าสุดของแต่ละหุ้น): "
+        f"**{format_money(total_dividend_baht)} บาท**  | 🎯 เป้าหมาย: {format_money(goal_amount)}"
+    )
+
+    # เพิ่มส่วนสรุปย่อย
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("จำนวนหุ้นในพอร์ต", len(portfolio_df))
+    with col2:
+        st.metric("หุ้นที่มีปันผล", sum(1 for r in dividend_rows if r['เงินปันผล/หุ้น (ปีล่าสุด)'] > 0))
+    with col3:
+        progress_pct = (total_dividend_baht / goal_amount * 100) if goal_amount > 0 else 0
+        st.metric("ความคืบหน้าเป้าหมาย (%)", f"{progress_pct:.2f}%")
+
+# -------------------------------------------------
+# DCA Calculator (พื้นฐาน)
+# -------------------------------------------------
 def dca_calculator():
-    st.subheader("🧮 DCA (Dollar-Cost Averaging) Calculator")
+    st.title("🧮 DCA Calculator")
 
-    # Inputs
-    symbol = st.text_input("Stock Symbol (e.g., ADVANC)", value="")
-    current_price = st.number_input("Current Price (THB)", min_value=0.0, value=0.0, step=0.01)
-    periodic_amount = st.number_input("Investment Amount per Period (THB)", min_value=0.0, value=1000.0, step=100.0)
-    periods_per_year = st.selectbox("Frequency", [
-        ("Monthly (12x)", 12),
-        ("Bi-Weekly (~26x)", 26),
-        ("Weekly (52x)", 52),
-        ("Quarterly (4x)", 4),
-        ("Annually (1x)", 1)
-    ], format_func=lambda x: x[0])[1]
+    st.markdown("คำนวณการถัวเฉลี่ยต้นทุน (Dollar-Cost Averaging) และประเมินปันผลที่อาจได้รับ")
 
-    use_dividend_lookup = st.checkbox("Fetch estimated annual dividend per share from history (if available)", value=True)
-    manual_dividend = st.number_input("OR manual expected annual dividend per share (THB)", min_value=0.0, value=0.0, step=0.01)
+    symbol = st.text_input("หุ้น (เช่น PTT, ADVANC)").strip().upper()
+    current_price = st.number_input("ราคาปัจจุบัน (บาท)", min_value=0.0, value=0.0, step=0.01)
+    invest_per_period = st.number_input("จำนวนเงินต่อรอบ (บาท)", min_value=0.0, value=1000.0, step=100.0)
+    freq_label = st.selectbox("ความถี่", ["รายเดือน (12x)", "รายสัปดาห์ (52x)", "รายไตรมาส (4x)", "ปีละครั้ง (1x)"])
+    freq_map = {
+        "รายเดือน (12x)": 12,
+        "รายสัปดาห์ (52x)": 52,
+        "รายไตรมาส (4x)": 4,
+        "ปีละครั้ง (1x)": 1
+    }
+    periods = freq_map[freq_label]
 
-    if st.button("Calculate"):
+    use_latest_div = st.checkbox("ใช้ปันผล/หุ้น จากปีล่าสุด (ถ้ามี)", value=True)
+    manual_div = st.number_input("หรือระบุปันผลต่อหุ้นต่อปีเอง (บาท)", min_value=0.0, value=0.0, step=0.01)
+
+    if st.button("คำนวณ"):
         if not symbol:
-            st.warning("Please enter a symbol.")
+            st.warning("กรุณากรอกชื่อหุ้น")
             return
         if current_price <= 0:
-            st.warning("Current price must be greater than 0.")
+            st.warning("กรุณาระบุราคาปัจจุบัน > 0")
             return
-        if periodic_amount <= 0:
-            st.warning("Investment amount must be greater than 0.")
+        if invest_per_period <= 0:
+            st.warning("กรุณาระบุจำนวนเงินลงทุน > 0")
             return
 
-        shares_per_period = periodic_amount / current_price
-        total_shares_year = shares_per_period * periods_per_year
-        total_invested_year = periodic_amount * periods_per_year
+        shares_per_period = invest_per_period / current_price
+        total_shares_1y = shares_per_period * periods
+        total_cost_1y = invest_per_period * periods
 
-        if use_dividend_lookup:
-            div_df = get_dividends(symbol)
-            if not div_df.empty and "Dividend" in div_df.columns:
-                annual_div_per_share = div_df["Dividend"].sum()
-            else:
-                annual_div_per_share = manual_dividend
-        else:
-            annual_div_per_share = manual_dividend
+        annual_div_per_share = 0.0
+        if use_latest_div:
+            div_df = load_dividend_history(symbol)
+            if not div_df.empty:
+                latest_year = div_df["Year"].max()
+                annual_div_per_share = div_df[div_df["Year"] == latest_year]["Dividend"].sum()
+        if annual_div_per_share == 0 and manual_div > 0:
+            annual_div_per_share = manual_div
 
-        est_annual_div_income = total_shares_year * annual_div_per_share if annual_div_per_share else 0.0
-        forward_yield = (annual_div_per_share / current_price * 100) if current_price > 0 and annual_div_per_share else 0.0
-        effective_yield_on_invested = (est_annual_div_income / total_invested_year * 100) if total_invested_year > 0 and est_annual_div_income else 0.0
+        est_div_income_after_1y = total_shares_1y * annual_div_per_share
+        forward_yield = (annual_div_per_share / current_price * 100) if current_price > 0 and annual_div_per_share > 0 else 0
+        effective_yield_on_cost = (est_div_income_after_1y / total_cost_1y * 100) if total_cost_1y > 0 and est_div_income_after_1y > 0 else 0
 
-        st.markdown("### Results")
-        st.write(f"Shares purchased per period: **{shares_per_period:.4f}**")
-        st.write(f"Estimated shares accumulated in 1 year: **{total_shares_year:.4f}**")
-        st.write(f"Total invested in 1 year: **{total_invested_year:,.2f} THB**")
-        st.write(f"Annual dividend per share (estimated): **{annual_div_per_share:.2f} THB**")
-        st.write(f"Estimated annual dividend income after 1 year: **{est_annual_div_income:,.2f} THB**")
-        st.write(f"Forward yield (% of current price): **{forward_yield:.2f}%**")
-        st.write(f"Effective yield on first-year invested capital: **{effective_yield_on_invested:.2f}%**")
+        st.markdown("### ผลลัพธ์")
+        st.write(f"- หุ้นต่อรอบ (ประมาณ): **{shares_per_period:.4f} หุ้น**")
+        st.write(f"- หุ้นสะสมหลัง 1 ปี: **{total_shares_1y:.4f} หุ้น**")
+        st.write(f"- เงินลงทุนรวม 1 ปี: **{format_money(total_cost_1y)} บาท**")
+        st.write(f"- ปันผลต่อหุ้น (ปี): **{annual_div_per_share:.3f} บาท**")
+        st.write(f"- ประเมินปันผลหลัง 1 ปี: **{format_money(est_div_income_after_1y)} บาท**")
+        st.write(f"- Forward Yield (ต่อหุ้น): **{forward_yield:.2f}%**")
+        st.write(f"- ผลตอบแทนปันผลเทียบเงินลงทุนปีแรก: **{effective_yield_on_cost:.2f}%**")
+
+        st.info("หมายเหตุ: การคำนวณนี้เป็นการประเมินจากข้อมูลย้อนหลัง อาจไม่สะท้อนอนาคต")
+
+# -------------------------------------------------
+# (ออปชัน) ฟังก์ชันเสริม debug
+# -------------------------------------------------
+def debug_dividend(symbol: str):
+    st.write(f"DEBUG: {symbol}")
+    df = load_dividend_history(symbol)
+    st.write(df.head())
