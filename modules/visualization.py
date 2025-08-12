@@ -7,7 +7,7 @@ import plotly.express as px
 def summary_dashboard():
     st.header("📊 ภาพรวมพอร์ต")
 
-    conn = sqlite3.connect("data/database.db", check_same_thread=False)
+    conn = sqlite3.connect("database/database.db", check_same_thread=False)
     df = pd.read_sql("SELECT * FROM portfolio", conn)
 
     if not df.empty:
